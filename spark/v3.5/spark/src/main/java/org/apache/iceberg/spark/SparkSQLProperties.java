@@ -99,7 +99,7 @@ public class SparkSQLProperties {
   public static final String REPORT_COLUMN_STATS = "spark.sql.iceberg.report-column-stats";
   public static final boolean REPORT_COLUMN_STATS_DEFAULT = true;
 
-  public static final String OLD_STATISTICS_USAGE_THRESHOLD =
-      "spark.sql.iceberg.old-statistics-usage-threshold";
+  public static final String OLD_STATISTICS_USAGE_THRESHOLD_PERCENTAGE =
+      "spark.sql.iceberg.old-statistics-usage-threshold-percentage";
   public static final int OLD_STATISTICS_USAGE_THRESHOLD_DEFAULT = 100;
 }

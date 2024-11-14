@@ -359,7 +359,7 @@ public class SparkReadConf {
   public long oldStatisticsUsageThreshold() {
     return confParser
         .longConf()
-        .sessionConf(SparkSQLProperties.OLD_STATISTICS_USAGE_THRESHOLD)
+        .sessionConf(SparkSQLProperties.OLD_STATISTICS_USAGE_THRESHOLD_PERCENTAGE)
         .defaultValue(SparkSQLProperties.OLD_STATISTICS_USAGE_THRESHOLD_DEFAULT)
         .parse();
   }
