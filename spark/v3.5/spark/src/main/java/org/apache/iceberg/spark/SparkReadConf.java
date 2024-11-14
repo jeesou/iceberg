@@ -355,4 +355,12 @@ public class SparkReadConf {
         .defaultValue(SparkSQLProperties.REPORT_COLUMN_STATS_DEFAULT)
         .parse();
   }
+
+  public long oldStatisticsUsageThreshold() {
+    return confParser
+        .longConf()
+        .sessionConf(SparkSQLProperties.OLD_STATISTICS_USAGE_THRESHOLD)
+        .defaultValue(SparkSQLProperties.OLD_STATISTICS_USAGE_THRESHOLD_DEFAULT)
+        .parse();
+  }
 }

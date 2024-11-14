@@ -25,6 +25,7 @@ import java.util.Optional;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import org.apache.iceberg.BlobMetadata;
+import org.apache.iceberg.DataOperations;
 import org.apache.iceberg.ScanTask;
 import org.apache.iceberg.ScanTaskGroup;
 import org.apache.iceberg.Schema;
@@ -195,9 +196,9 @@ abstract class SparkScan implements Scan, SupportsReportStatistics {
     Map<NamedReference, ColumnStatistics> colStatsMap = Collections.emptyMap();
     if (readConf.reportColumnStats() && cboEnabled) {
       colStatsMap = Maps.newHashMap();
-      Optional<StatisticsFile> statisticsFile = table.statistics(snapshot.snapshotId());
-      if (statisticsFile.isPresent()) {
-        List<BlobMetadata> metadataList = statisticsFile.get().blobMetadata();
+      List<BlobMetadata> metadataList = getMetaDataList(snapshot);
+      if (!metadataList.isEmpty()) {
+        LOG.debug("Statistics found for the table {}", table.name());
 
         for (BlobMetadata blobMetadata : metadataList) {
           int id = blobMetadata.fields().get(0);
@@ -244,6 +245,79 @@ abstract class SparkScan implements Scan, SupportsReportStatistics {
     long rowsCount = taskGroups().stream().mapToLong(ScanTaskGroup::estimatedRowsCount).sum();
     long sizeInBytes = SparkSchemaUtil.estimateSize(readSchema(), rowsCount);
     return new Stats(sizeInBytes, rowsCount, colStatsMap);
+  }
+
+  private List<BlobMetadata> getMetaDataList(Snapshot snapshot) {
+    int size = table.statisticsFiles().size();
+    if (size > 0) {
+      // get stats from the metadata through current Snapshot
+      Optional<StatisticsFile> statisticsFile = table.statistics(snapshot.snapshotId());
+      if (statisticsFile.isPresent()) {
+        return statisticsFile.get().blobMetadata();
+      } else {
+        return shouldUseOldStats(snapshot)
+            ? table.statisticsFiles().get(size - 1).blobMetadata()
+            : Collections.emptyList();
+      }
+    }
+    return Collections.emptyList();
+  }
+
+  private boolean shouldUseOldStats(Snapshot currentSnapshot) {
+    Optional<StatisticsFile> latestStats = getLatestStatisticsFile(currentSnapshot);
+
+    List<Snapshot> snapshots = Lists.newArrayList();
+    SnapshotUtil.currentAncestors(table).forEach(snapshots::add);
+    Snapshot previousSnapshotWithStatistics =
+        snapshots.stream()
+            .filter(snap -> snap.snapshotId() == latestStats.get().snapshotId())
+            .findFirst()
+            .orElse(null);
+
+    List<Snapshot> snap = Lists.newArrayList();
+    SnapshotUtil.ancestorsBetween(
+            table, currentSnapshot.snapshotId(), previousSnapshotWithStatistics.snapshotId())
+        .forEach(snap::add);
+    Optional<Snapshot> snapshotWithDeleteOperation =
+        snap.stream().filter(sn -> sn.operation().equals(DataOperations.DELETE)).findAny();
+    if (snapshotWithDeleteOperation.isPresent()) {
+      LOG.debug(
+          "Snapshot with delete operation present {}",
+          snapshotWithDeleteOperation.get().snapshotId());
+      return false;
+    }
+
+    long totalRecordsNow =
+        Long.parseLong(currentSnapshot.summary().getOrDefault("total-records", "0"));
+    long totalRecordsPreviously =
+        Long.parseLong(previousSnapshotWithStatistics.summary().getOrDefault("total-records", "0"));
+    long threshold = readConf.oldStatisticsUsageThreshold();
+    long dataChange = Math.abs(totalRecordsNow - totalRecordsPreviously);
+    long changeAmt = (dataChange * 100) / totalRecordsPreviously;
+    return changeAmt < threshold;
+  }
+
+  private Optional<StatisticsFile> getLatestStatisticsFile(Snapshot currentSnapshot) {
+    return table.statisticsFiles().stream()
+        .min(
+            (first, second) -> {
+              if (first == second) {
+                return 0;
+              }
+              if (table.snapshot(first.snapshotId()) == null) {
+                return 1;
+              }
+              if (table.snapshot(second.snapshotId()) == null) {
+                return -1;
+              }
+              Snapshot firstSnap = table.snapshot(first.snapshotId());
+              Snapshot secondSnap = table.snapshot(second.snapshotId());
+              long firstDiff =
+                  Math.abs(currentSnapshot.timestampMillis() - firstSnap.timestampMillis());
+              long secondDiff =
+                  Math.abs(currentSnapshot.timestampMillis() - secondSnap.timestampMillis());
+              return Long.compare(firstDiff, secondDiff);
+            });
   }
 
   private long totalRecords(Snapshot snapshot) {
