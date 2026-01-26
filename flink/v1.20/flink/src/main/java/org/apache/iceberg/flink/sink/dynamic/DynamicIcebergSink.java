@@ -187,9 +187,11 @@ public class DynamicIcebergSink
     private ReadableConfig readableConfig = new Configuration();
     private TableCreator tableCreator = TableCreator.DEFAULT;
     private boolean immediateUpdate = false;
+    private boolean dropUnusedColumns = false;
     private int cacheMaximumSize = 100;
     private long cacheRefreshMs = 1_000;
     private int inputSchemasPerTableCacheMaximumSize = 10;
+    private boolean caseSensitive = true;
 
     Builder() {}
 
@@ -314,6 +316,22 @@ public class DynamicIcebergSink
       return this;
     }
 
+    /**
+     * Dropping columns is disabled by default to prevent issues with late or out-of-order data, as
+     * removed fields cannot be easily restored without data loss.
+     *
+     * <p>You can opt-in to allow dropping columns. Once a column has been dropped, it is
+     * technically still possible to write data to that column because Iceberg maintains all past
+     * table schemas. However, regular queries won't be able to reference the column. If the field
+     * was to re-appear as part of a new schema, an entirely new column would be added, which apart
+     * from the name, has nothing in common with the old column, i.e. queries for the new column
+     * will never return data of the old column.
+     */
+    public Builder<T> dropUnusedColumns(boolean newDropUnusedColumns) {
+      this.dropUnusedColumns = newDropUnusedColumns;
+      return this;
+    }
+
     /** Maximum size of the caches used in Dynamic Sink for table data and serializers. */
     public Builder<T> cacheMaxSize(int maxSize) {
       this.cacheMaximumSize = maxSize;
@@ -333,6 +351,15 @@ public class DynamicIcebergSink
      */
     public Builder<T> inputSchemasPerTableCacheMaxSize(int inputSchemasPerTableCacheMaxSize) {
       this.inputSchemasPerTableCacheMaximumSize = inputSchemasPerTableCacheMaxSize;
+      return this;
+    }
+
+    /**
+     * Set whether schema field name matching should be case-sensitive. The default is to match the
+     * field names case-sensitive.
+     */
+    public Builder<T> caseSensitive(boolean newCaseSensitive) {
+      this.caseSensitive = newCaseSensitive;
       return this;
     }
 
@@ -385,7 +412,9 @@ public class DynamicIcebergSink
                       cacheMaximumSize,
                       cacheRefreshMs,
                       inputSchemasPerTableCacheMaximumSize,
-                      tableCreator))
+                      tableCreator,
+                      caseSensitive,
+                      dropUnusedColumns))
               .uid(prefixIfNotNull(uidPrefix, "-generator"))
               .name(operatorName("generator"))
               .returns(type);
@@ -403,7 +432,9 @@ public class DynamicIcebergSink
                       cacheMaximumSize,
                       cacheRefreshMs,
                       inputSchemasPerTableCacheMaximumSize,
-                      tableCreator))
+                      tableCreator,
+                      caseSensitive,
+                      dropUnusedColumns))
               .uid(prefixIfNotNull(uidPrefix, "-updater"))
               .name(operatorName("Updater"))
               .returns(type)
